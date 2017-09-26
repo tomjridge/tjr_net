@@ -26,7 +26,6 @@ let i2bs ~buf ~off ~i ~n =
 
 (* read n bytes from buf (going down from off!) and return int *)
 let bs2i ~buf ~off ~n = 
-  assert_ (Bytes.length buf >= 4+off);
   let rec f ~off ~i ~n = n |> function
     | 0 -> i
     | _ -> 
@@ -35,6 +34,13 @@ let bs2i ~buf ~off ~n =
       f ~off:(off-1) ~i ~n:(n-1)
   in
   f ~off ~i:0 ~n
+
+
+let _ = assert (
+  let i = 123456 in
+  Bytes.create 4 |> fun buf ->
+  i2bs ~buf ~off:0 ~i ~n:4;
+  bs2i ~buf ~off:3 ~n:4 = i)
 
 open Lwt
 
@@ -112,7 +118,7 @@ let rec read_n ~conn ~buf ~off ~len : unit t=
 let read_length ~conn : int t = 
   Bytes.create 4 |> fun buf ->
   read_n ~conn ~buf ~off:0 ~len:4 >>= fun () ->
-  bs2i ~buf ~off:4 ~n:4 |> fun i ->
+  bs2i ~buf ~off:3 ~n:4 |> fun i ->
   return i
 
 
