@@ -80,8 +80,28 @@ let connect ~quad =
 
 (* send, recv ------------------------------------------------------- *)
 
+
+(* send length as 4 bytes, then the string itself; NOTE for
+   performance, it is quite important to try to call write with a
+   buffer which includes everything to do with the message *)
+let send_string ~conn ~string_ : unit t =
+  String.length string_ |> fun len ->
+  let buf = Bytes.create (4+len) in
+  i2bs ~buf ~off:0 ~i:len ~n:4;
+  Bytes.blit_string string_ 0 buf 4 len;
+  (* now write the buffer *)
+  write conn buf 0 (4+len) >>= fun nwritten ->
+  assert_(nwritten=4+len);  (* FIXME or loop? *)
+  return ()
+
+
+let send_strings ~conn ~strings : unit t =
+  Marshal.to_string strings [] |> fun string_ ->
+  send_string ~conn ~string_
+
+
 (* actually read len bytes *)
-let rec read_n ~conn ~buf ~off ~len = 
+let rec read_n ~conn ~buf ~off ~len : unit t= 
   len |> function
   | 0 -> return_unit
   | _ -> 
@@ -92,6 +112,21 @@ let rec read_n ~conn ~buf ~off ~len =
 let read_length ~conn : int t = 
   Bytes.create 4 |> fun buf ->
   read_n ~conn ~buf ~off:0 ~len:4 >>= fun () ->
-  bs2i ~buf ~off:0 |> fun i ->
-  assert (p.mark' P.hi);
-  i)
+  bs2i ~buf ~off:4 ~n:4 |> fun i ->
+  return i
+
+
+let recv_string ~conn : string t = 
+  read_length ~conn >>= fun len -> 
+  Bytes.create len |> fun buf ->          
+  read_n ~conn ~buf ~off:0 ~len >>= fun () ->
+  Bytes.unsafe_to_string buf |> return
+
+
+(* FIXME marshal is a bit platform-specific? *)
+let recv_strings ~conn : string list t = 
+  recv_string ~conn >>= fun s ->
+  Marshal.from_string s 0 |> fun (ss:string list) ->
+  return ss
+
+
