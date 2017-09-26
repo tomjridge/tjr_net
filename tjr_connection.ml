@@ -57,31 +57,34 @@ type quad = { local:ipp; remote: ipp }
 (* accept connections for this quad only *)
 let listen_accept ~quad = 
   socket PF_INET SOCK_STREAM 0 |> fun (srvr:file_descr) ->
-  let listen = fun () ->
-    (* hack to speed up recovery *)
-    setsockopt srvr SO_REUSEADDR true;
-    let addr = quad.local in
-    bind srvr addr >>= fun () ->
-    listen srvr 5;
-    accept srvr >>= fun (c,_) ->
-    if getpeername c <> quad.remote then 
-      close c >>= fun () -> fail_with __LOC__  (* connection doesn't match quad *)
-    else 
-      return c
-  in
-  finalize listen (fun () -> close srvr)
+  let srvr' = fun () -> close srvr in
+  finalize 
+    (fun () ->
+       (* hack to speed up recovery *)
+       setsockopt srvr SO_REUSEADDR true;
+       let addr = quad.local in
+       bind srvr addr >>= fun () ->
+       listen srvr 5;
+       accept srvr >>= fun (c,_) ->
+       if getpeername c <> quad.remote then 
+         close c >>= fun () -> fail_with __LOC__  
+     (* connection doesn't match quad *)
+       else
+         return c)
+    srvr'
 
 
 let connect ~quad = 
   socket Unix.PF_INET Unix.SOCK_STREAM 0 |> fun (c:file_descr) ->
-  let connect () = 
-    (* hack to speed up recovery *)
-    setsockopt c SO_REUSEADDR true;
-    bind c quad.local >>= fun () ->
-    connect c quad.remote >>= fun () ->
-    return c
-  in
-  finalize connect (fun () -> close c)
+  let c' = fun exn -> close c >>= fun () -> fail exn in
+  catch 
+    (fun () ->
+       (* hack to speed up recovery *)
+       setsockopt c SO_REUSEADDR true;
+       bind c quad.local >>= fun () ->
+       connect c quad.remote >>= fun () ->
+       return c)
+    c'
 
 
 (* send, recv ------------------------------------------------------- *)
