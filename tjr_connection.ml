@@ -1,5 +1,7 @@
 (* network connections *)
 
+(* FIXME moved to tjr_lib 
+
 
 (* int <-> byte_x4 conversion *)
 
@@ -139,3 +141,4 @@ let recv_strings ~conn : string list t =
   return ss
 
 
+*)
