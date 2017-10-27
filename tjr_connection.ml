@@ -136,6 +136,7 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
 
     (* accept connections for this quad only *)
     let listen_accept ~quad = 
+      return () >>= fun () ->
       ops.socket Unix.PF_INET Unix.SOCK_STREAM 0 >>= fun srvr ->
       extra.finally (fun () -> ops.close srvr)
         begin
@@ -150,9 +151,9 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
               if pn <> quad.remote then 
                 (* connection doesn't match quad *)
                 ops.close c >>= fun () ->
-                return (`Listen_accept_incorrect_peername)
+                return `Listen_accept_incorrect_peername
               else
-                return @@ (`Connection c)
+                return (`Connection c)
             end
         end
     in
@@ -160,6 +161,7 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
     let _ = listen_accept in  
 
     let connect ~quad = 
+      return () >>= fun () ->
       ops.socket Unix.PF_INET Unix.SOCK_STREAM 0 >>= fun c ->
       extra.catch (fun _ -> ops.close c)
         begin
@@ -238,7 +240,8 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
     in
 
 
-    (* FIXME marshal is a bit platform-specific; send # strings, then each string *)
+    (* FIXME marshal is a bit platform-specific; send # strings, then
+       each string *)
     let recv_strings ~conn = 
       return () >>= fun () ->
       recv_string ~conn >>= function
@@ -294,23 +297,24 @@ module Unix_ = struct
     | Unix.Unix_error (e,s1,s2) -> Error (e,s1,s2)
   (* NOTE other exceptions are not caught *)
 
+  let log_ s = ()
 
-  let wrap1 f = fun a -> wrap @@ fun () -> f a
-  let wrap2 f = fun a b -> wrap @@ fun () -> f a b 
-  let wrap3 f = fun a b c -> wrap @@ fun () -> f a b c 
-  let wrap4 f = fun a b c d -> wrap @@ fun () -> f a b c d
+  let wrap1 s f = fun a -> wrap @@ fun () -> log_ s; f a
+  let wrap2 s f = fun a b -> wrap @@ fun () -> log_ s; f a b 
+  let wrap3 s f = fun a b c -> wrap @@ fun () -> log_ s; f a b c 
+  let wrap4 s f = fun a b c d -> wrap @@ fun () -> log_ s; f a b c d
 
   let ops = {
-    socket=(wrap3 socket);
-    setsockopt=(wrap3 setsockopt);
-    bind_=(wrap2 Unix.bind);
-    listen=(wrap2 listen);
-    accept=(wrap1 accept);
-    getpeername=(wrap1 getpeername);
-    close=(wrap1 close);
-    connect=(wrap2 connect);
-    write=(wrap4 write);
-    read=(wrap4 read);
+    socket=(wrap3 "socket" socket);
+    setsockopt=(wrap3 "setsockopt" setsockopt);
+    bind_=(wrap2 "bind" Unix.bind);
+    listen=(wrap2 "listen" listen);
+    accept=(wrap1 "accept" accept);
+    getpeername=(wrap1 "getpeername" getpeername);
+    close=(wrap1 "close" close);
+    connect=(wrap2 "connect" connect);
+    write=(wrap4 "write" write);
+    read=(wrap4 "read" read);
   }
 
   let extra = {
@@ -319,7 +323,8 @@ module Unix_ = struct
       | Ok x -> Ok x
       | Error e -> ignore (f e); Error e);
     finally=(fun f a -> 
-        ignore(f ()); a)
+        (* NOTE a is already a result *)
+        ignore (f()); a)
   }
 
   let (listen_accept,connect,send_string,send_strings,recv_string,recv_strings) = 
@@ -388,5 +393,5 @@ module Lwt_ = struct
     (listen_accept,connect,send_string,send_strings,recv_string,recv_strings)
 
   let _ = listen_accept
-
+  let _ = connect 
 end

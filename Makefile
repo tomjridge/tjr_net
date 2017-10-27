@@ -3,7 +3,11 @@ BASH_ENV:=bash_env.sh
 export BASH_ENV
 
 
-all:
+all: lib
+	$(MAKE) -C bin
+
+
+lib:
 	$$ocamlc -c $$mls
 	$$ocamlopt -c $$mls
 	@echo "NOTE cma contains: $$cmos" # simple check
@@ -15,7 +19,8 @@ all:
 install:
 	-ocamlfind remove $$package_name
 	mk_meta
-	ocamlfind install $$package_name META *.cmi *.o *.a *.cma *.cmxa *.cmo *.cmx 
+	ocamlfind install $$package_name META *.cmi *.o *.a *.cma *.cmxa *.cmo *.cmx
+
 
 
 uninstall:
