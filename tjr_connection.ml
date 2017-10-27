@@ -77,17 +77,17 @@ module type NET_OPS = sig
   open Unix
   include FILE_DESCR
   include MONAD
-  type net_ops = {
-    socket: socket_domain -> socket_type -> int -> file_descr m;
-    setsockopt: file_descr -> socket_bool_option -> bool -> unit m;
-    bind_: file_descr -> sockaddr -> unit m;
-    listen: file_descr -> int -> unit m;
-    accept: file_descr -> (file_descr * sockaddr) m;
-    getpeername: file_descr -> sockaddr m;
-    close: file_descr -> unit m;
-    connect: file_descr -> sockaddr -> unit m;
-    write: file_descr -> bytes -> int -> int -> int m;
-    read: file_descr -> bytes -> int -> int -> int m;
+  type 'e net_ops = {
+    socket: socket_domain -> socket_type -> int -> (file_descr,'e) result m;
+    setsockopt: file_descr -> socket_bool_option -> bool -> (unit,'e) result m;
+    bind_: file_descr -> sockaddr -> (unit,'e) result m;
+    listen: file_descr -> int -> (unit,'e) result m;
+    accept: file_descr -> (file_descr * sockaddr,'e) result m;
+    getpeername: file_descr -> (sockaddr,'e) result m;
+    close: file_descr -> unit m;  (* NOTE does not return result *)
+    connect: file_descr -> sockaddr -> (unit,'e) result m;
+    write: file_descr -> bytes -> int -> int -> (int,'e) result m;
+    read: file_descr -> bytes -> int -> int -> (int,'e) result m;
   }
 end
 
@@ -95,17 +95,17 @@ module Make_net_ops_type(FD:FILE_DESCR)(M:MONAD) = struct
   open Unix
   open FD
   open M
-  type net_ops = {
-    socket: socket_domain -> socket_type -> int -> file_descr m;
-    setsockopt: file_descr -> socket_bool_option -> bool -> unit m;
-    bind_: file_descr -> sockaddr -> unit m;
-    listen: file_descr -> int -> unit m;
-    accept: file_descr -> (file_descr * sockaddr) m;
-    getpeername: file_descr -> sockaddr m;
-    close: file_descr -> unit m;
-    connect: file_descr -> sockaddr -> unit m;
-    write: file_descr -> bytes -> int -> int -> int m;
-    read: file_descr -> bytes -> int -> int -> int m;
+  type 'e net_ops = {
+    socket: socket_domain -> socket_type -> int -> (file_descr,'e) result m;
+    setsockopt: file_descr -> socket_bool_option -> bool -> (unit,'e) result m;
+    bind_: file_descr -> sockaddr -> (unit,'e) result m;
+    listen: file_descr -> int -> (unit,'e) result m;
+    accept: file_descr -> (file_descr * sockaddr,'e) result m;
+    getpeername: file_descr -> (sockaddr,'e) result m;
+    close: file_descr -> unit m;  (* NOTE does not return a result? *)
+    connect: file_descr -> sockaddr -> (unit,'e) result m;
+    write: file_descr -> bytes -> int -> int -> (int,'e) result m;
+    read: file_descr -> bytes -> int -> int -> (int,'e) result m;
   }
 end
 
@@ -113,13 +113,28 @@ end
 module Make_msg_lib(Net_ops:NET_OPS) = struct
   open Net_ops
   let ( >>= ) = bind
+  let ( >>== ) = bind (* save *)
 
- 
+  (* we want to use a bind that stops when an Error e is returned *)
+  let ( >>= ) a b = a >>= function
+    | Ok a -> b a
+    | Error e -> return (Error e)
+
+  (* NOTE that this is parameterized by the actual errors that might
+     be involved, so different implementations can catch different
+     errors; but the type of errors is fixed over all functions *)
   type 'e extra = {
     catch: 'a. ('e -> 'a m) -> 'a m -> 'a m;
   }
 
-  let mk_msg_lib ~ops ~catch = 
+  (* these are pulled out from the code below FIXME don't we want to distinguish between lower level errors and errors at our level? and isn't this what the type of `Net_err was telling us? *)
+  type e = [ 
+      `Listen_accept_incorrect_peername | 
+      `Net_err of e | 
+      `Read_n_read_error | 
+      `Send_string_write_error ]
+
+  let mk_msg_lib ~(ops:e net_ops) ~(catch:e extra) = 
     (* accept connections for this quad only *)
     let listen_accept ~quad = 
       ops.socket Unix.PF_INET Unix.SOCK_STREAM 0 >>= fun srvr ->
@@ -132,13 +147,13 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
         ops.getpeername c >>= fun pn -> 
         if pn <> quad.remote then 
           (* connection doesn't match quad *)
-          ops.close c >>= fun () -> return `Error_incorrect_peername
+          ops.close c >>== fun () -> return @@ Error `Listen_accept_incorrect_peername
         else
-          return @@ `Connection c
+          return @@ Ok c
       end
       |> catch.catch (function 
           (* NOTE this is an error from the lower level *)
-          | e -> ops.close srvr >>= fun () -> return @@ `Net_err e)
+          | e -> ops.close srvr >>== fun () -> return @@ Error (`Net_err e))
     in
 
     let _ = listen_accept in  
@@ -153,10 +168,10 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
         ops.setsockopt c Unix.SO_REUSEADDR true >>= fun () ->
         ops.bind_ c quad.local >>= fun () ->
         ops.connect c quad.remote >>= fun () ->
-        return @@ `Connection c
+        return @@ Ok c
       end
       |> catch.catch (function
-          | e -> ops.close c >>= fun () -> return @@ `Net_err e)
+          | e -> ops.close c >>== fun () -> return @@ Error (`Net_err e))
     in
 
 
@@ -166,22 +181,23 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
        performance, it is quite important to try to call write with a
        buffer which includes everything to do with the message *)
     let send_string ~conn s =
-      return () >>= fun () ->
+      return (Ok ()) >>= fun () ->
       String.length s |> fun len ->
       let buf = Bytes.create (4+len) in
       i2bs ~buf ~off:0 ~i:len ~n:4;
       Bytes.blit_string s 0 buf 4 len;
       (* now write the buffer *)
       ops.write conn buf 0 (4+len) >>= fun nwritten ->
-      assert_(nwritten=4+len);  (* FIXME or loop? *)
-      return ()
+      match (nwritten=4+len) with
+      | true -> return (Ok ())
+      | false -> return (Error `Send_string_write_error)
     in
 
     let _ = send_string in
 
     (* send nstrings, followed by strings *)
     let send_strings ~conn (strings:string list) =
-      return () >>= fun () ->
+      return (Ok ()) >>= fun () ->
       Marshal.to_string strings [] |> fun s ->
       send_string ~conn s
     in
@@ -190,39 +206,40 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
 
     (* actually read len bytes *)
     let rec read_n ~conn ~buf ~off ~len = 
-      return () >>= fun () ->
+      return (Ok ()) >>= fun () ->
       len |> function
-      | 0 -> return ()
+      | 0 -> return (Ok ())
       | _ -> 
         ops.read conn buf off len >>= fun nread ->
         (* FIXME when connection closed, this should return error in monad *)
-        assert(nread<>0);  
-        read_n ~conn ~buf ~off:(off+nread) ~len:(len-nread)
+        match nread with 
+        | 0 -> return (Error `Read_n_read_error)
+        | _ -> read_n ~conn ~buf ~off:(off+nread) ~len:(len-nread)
     in
 
-    let read_length ~conn : int m =
-      return () >>= fun () ->
+    let read_length ~conn : (int,'e) result m =
+      return (Ok ()) >>= fun () ->
       Bytes.create 4 |> fun buf ->
       read_n ~conn ~buf ~off:0 ~len:4 >>= fun () ->
       bs2i ~buf ~off:3 ~n:4 |> fun i ->
-      return i
+      return (Ok i)
     in
 
-    let recv_string ~conn : string m =
-      return () >>= fun () ->
+    let recv_string ~conn : (string,'e) result m =
+      return (Ok ()) >>= fun () ->
       read_length ~conn >>= fun len -> 
       Bytes.create len |> fun buf ->          
       read_n ~conn ~buf ~off:0 ~len >>= fun () ->
-      Bytes.unsafe_to_string buf |> return
+      Bytes.unsafe_to_string buf |> fun s -> return (Ok s)
     in
 
 
     (* FIXME marshal is a bit platform-specific? *)
-    let recv_strings ~conn : string list m = 
-      return () >>= fun () ->
+    let recv_strings ~conn : (string list,'e) result m = 
+      return (Ok ()) >>= fun () ->
       recv_string ~conn >>= fun s ->
       Marshal.from_string s 0 |> fun (ss:string list) ->
-      return ss
+      return (Ok ss)
     in
 
     fun k -> k ~listen_accept ~connect ~send_string ~send_strings ~recv_string ~recv_strings
