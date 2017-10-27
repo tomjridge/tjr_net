@@ -195,6 +195,8 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
       | 0 -> return ()
       | _ -> 
         ops.read conn buf off len >>= fun nread ->
+        (* FIXME when connection closed, this should return error in monad *)
+        assert(nread<>0);  
         read_n ~conn ~buf ~off:(off+nread) ~len:(len-nread)
     in
 
