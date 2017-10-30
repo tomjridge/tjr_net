@@ -1,5 +1,3 @@
-(* this is a version based on representing the calls concretely and
-   interpreting them in some particular monad *)
 
 let log_ s = ()
 
