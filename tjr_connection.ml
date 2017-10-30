@@ -1,6 +1,9 @@
 (* this is a version based on representing the calls concretely and
    interpreting them in some particular monad *)
 
+let log_ s = ()
+
+
 (* aux -------------------------------------------------------------- *)
 
 (* int <-> byte_x4 conversion *)
@@ -63,15 +66,23 @@ end
 
 (* functors ---------------------------------------------------------- *)
 
-module type FILE_DESCR = sig
-  type file_descr
-end
+module type FILE_DESCR = sig type file_descr end
 
 module type MONAD = sig
   type 'a m
   val return : 'a -> 'a m
   val bind : 'a m -> ('a -> 'b m) -> 'b m
 end 
+
+(* NOTE these types identify some of the errors; to be refined
+   later as needed *)
+type socket_err = [ `ERESOURCE | `EOTHER ]
+type bind_err = [ `EADDRINUSE | `EOTHER ]
+type listen_err = [ `EOTHER ]
+type accept_err = [ `EOTHER ]
+type connect_err = [ `EREFUSED | `EHOSTUNREACH | `EOTHER ]
+type read_err = [ `EOTHER ]
+type write_err = [ `EOTHER ]
 
 module type NET_OPS = sig
   open Unix
@@ -83,16 +94,16 @@ module type NET_OPS = sig
      catch and finally *)
 
   type net_ops = {
-    socket: socket_domain -> socket_type -> int -> file_descr m;
+    socket: socket_domain -> socket_type -> int -> (file_descr,socket_err)result m;
     setsockopt: file_descr -> socket_bool_option -> bool -> unit m;
-    bind_: file_descr -> sockaddr -> unit m;
-    listen: file_descr -> int -> unit m;
-    accept: file_descr -> (file_descr * sockaddr) m;
-    getpeername: file_descr -> sockaddr m;
+    bind_: file_descr -> sockaddr -> (unit,bind_err)result m;
+    listen: file_descr -> int -> (unit,listen_err)result m;
+    accept: file_descr -> (file_descr * sockaddr,accept_err)result m;
+    getpeername: file_descr -> sockaddr m;  (* option ?*)
     close: file_descr -> unit m;  
-    connect: file_descr -> sockaddr -> unit m;
-    write: file_descr -> bytes -> int -> int -> int m;
-    read: file_descr -> bytes -> int -> int -> int m;
+    connect: file_descr -> sockaddr -> (unit,connect_err)result m;
+    write: file_descr -> bytes -> int -> int -> (int,write_err)result m;
+    read: file_descr -> bytes -> int -> int -> (int,read_err)result m;
   }
 end
 
@@ -102,18 +113,17 @@ module Make_net_ops_type(FD:FILE_DESCR)(M:MONAD) = struct
   open M
 
   type net_ops = {
-    socket: socket_domain -> socket_type -> int -> file_descr m;
+    socket: socket_domain -> socket_type -> int -> (file_descr,socket_err)result m;
     setsockopt: file_descr -> socket_bool_option -> bool -> unit m;
-    bind_: file_descr -> sockaddr -> unit m;
-    listen: file_descr -> int -> unit m;
-    accept: file_descr -> (file_descr * sockaddr) m;
-    getpeername: file_descr -> sockaddr m;
+    bind_: file_descr -> sockaddr -> (unit,bind_err)result m;
+    listen: file_descr -> int -> (unit,listen_err)result m;
+    accept: file_descr -> (file_descr * sockaddr,accept_err)result m;
+    getpeername: file_descr -> sockaddr m;  (* option ?*)
     close: file_descr -> unit m;  
-    connect: file_descr -> sockaddr -> unit m;
-    write: file_descr -> bytes -> int -> int -> int m;
-    read: file_descr -> bytes -> int -> int -> int m;
+    connect: file_descr -> sockaddr -> (unit,connect_err)result m;
+    write: file_descr -> bytes -> int -> int -> (int,write_err)result m;
+    read: file_descr -> bytes -> int -> int -> (int,read_err)result m;
   }
-
 end
 
 
@@ -121,56 +131,51 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
   open Net_ops
   let ( >>= ) = bind
 
-  (* NOTE that this is parameterized by the actual errors that might
-     be involved, so different implementations can catch different
-     errors; but the type of errors is fixed over all functions *)
-  type 'e extra = {
-    catch: 'a. ('e -> unit m) -> 'a m -> 'a m;
-    finally: 'a. (unit -> unit m) -> 'a m -> 'a m
-  }
-
-
   (* NOTE in the following, lower level errors are returned as Error
      e; errors at this level are returned as Ok ... *)
-  let mk_msg_lib ~(ops:net_ops) ~extra = 
+  let mk_msg_lib ~(ops:net_ops) = 
 
     (* accept connections for this quad only *)
     let listen_accept ~quad = 
       return () >>= fun () ->
-      ops.socket Unix.PF_INET Unix.SOCK_STREAM 0 >>= fun srvr ->
-      extra.finally (fun () -> ops.close srvr)
+      ops.socket Unix.PF_INET Unix.SOCK_STREAM 0 >>= function | Error e -> return (Error `Socket) | Ok srvr ->
         begin
           (* hack to speed up recovery *)
           ops.setsockopt srvr Unix.SO_REUSEADDR true >>= fun () ->
-          ops.bind_ srvr quad.local >>= fun () -> 
-          ops.listen srvr 5 >>= fun () ->
-          ops.accept srvr >>= fun (c,_) ->
-          extra.catch (fun _ -> ops.close c)
-            begin
-              ops.getpeername c >>= fun pn -> 
-              if pn <> quad.remote then 
-                (* connection doesn't match quad *)
-                ops.close c >>= fun () ->
-                return `Listen_accept_incorrect_peername
-              else
-                return (`Connection c)
-            end
-        end
+          ops.bind_ srvr quad.local >>= function | Error e -> return (`E `Bind) | Ok () -> 
+            ops.listen srvr 5 >>= function | Error e -> return (`E `Other) | Ok () ->
+              ops.accept srvr >>= function | Error e -> return (`E `Other) | Ok (c,_) ->              
+                ops.getpeername c >>= fun pn -> 
+                if pn <> quad.remote then 
+                  (* connection doesn't match quad *)                
+                  ops.close c >>= fun () ->
+                  return (`E `Peername)
+                else
+                  return (`Connection c)
+        end >>= begin fun r -> 
+          ops.close srvr >>= fun () ->
+          return r
+        end >>= function
+        | `E `Bind -> return (Error `Bind)
+        | `E `Peername -> return (Error `Peername)
+        | `E _ -> return (Error `Other)
+        | `Connection c -> return (Ok c)
     in
 
     let _ = listen_accept in  
 
     let connect ~quad = 
       return () >>= fun () ->
-      ops.socket Unix.PF_INET Unix.SOCK_STREAM 0 >>= fun c ->
-      extra.catch (fun _ -> ops.close c)
+      ops.socket Unix.PF_INET Unix.SOCK_STREAM 0 >>= function | Error e -> return (Error `Socket) | Ok c ->
         begin
           (* hack to speed up recovery *)
           ops.setsockopt c Unix.SO_REUSEADDR true >>= fun () ->
-          ops.bind_ c quad.local >>= fun () ->
-          ops.connect c quad.remote >>= fun () ->
-          return @@ c
-        end
+          ops.bind_ c quad.local >>= function Error e -> return (`E `Bind) | Ok () ->
+            ops.connect c quad.remote >>= function Error e -> return (`E `Connect) | Ok () ->
+              return (`Connection c)
+        end >>= function
+        | `E x -> ops.close c >>= fun () -> return (Error x)
+        | `Connection c -> return (Ok c)
     in
     
     let _ = connect in
@@ -187,10 +192,10 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
       i2bs ~buf ~off:0 ~i:len ~n:4;
       Bytes.blit_string s 0 buf 4 len;
       (* now write the buffer *)
-      ops.write conn buf 0 (4+len) >>= fun nwritten ->
+      ops.write conn buf 0 (4+len) >>= function Error e -> return (Error()) | Ok nwritten ->
       match (nwritten=4+len) with
-      | true -> return `Ok
-      | false -> return `Send_string_write_error
+      | true -> return (Ok())
+      | false -> return (Error ())
     in
 
     let _ = send_string in
@@ -208,35 +213,29 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
     let rec read_n ~conn ~buf ~off ~len = 
       return () >>= fun () ->
       len |> function
-      | 0 -> return `Ok
+      | 0 -> return (Ok())
       | _ -> 
-        ops.read conn buf off len >>= fun nread ->
+        ops.read conn buf off len >>= function Error e -> return (Error()) | Ok nread ->
         (* FIXME when connection closed, this should return error in monad *)
         match nread with 
-        | 0 -> return `Read_n_read_error
+        | 0 -> return (Error())
         | _ -> read_n ~conn ~buf ~off:(off+nread) ~len:(len-nread)
     in
 
     let read_length ~conn =
       return () >>= fun () ->
       Bytes.create 4 |> fun buf ->
-      read_n ~conn ~buf ~off:0 ~len:4 >>= function
-      | `Read_n_read_error -> return `Err_read_length
-      | `Ok ->
-      bs2i ~buf ~off:3 ~n:4 |> fun i ->
-      return (`Length i)
+      read_n ~conn ~buf ~off:0 ~len:4 >>= function Error e -> return (Error()) | Ok () ->
+        bs2i ~buf ~off:3 ~n:4 |> fun i ->
+        return (Ok i)
     in
 
     let recv_string ~conn =
       return () >>= fun () ->
-      read_length ~conn >>= function
-      | `Err_read_length -> return `Err_recv_string
-      | `Length len -> 
+      read_length ~conn >>= function Error e -> return (Error()) | Ok len ->
         Bytes.create len |> fun buf ->          
-        read_n ~conn ~buf ~off:0 ~len >>= function
-        | `Read_n_read_error -> return `Err_recv_string
-        | `Ok ->
-          Bytes.unsafe_to_string buf |> fun s -> return (`Ok s)
+        read_n ~conn ~buf ~off:0 ~len >>= function Error e -> return (Error()) | Ok () ->
+          Bytes.unsafe_to_string buf |> fun s -> return (Ok s)
     in
 
 
@@ -244,11 +243,9 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
        each string *)
     let recv_strings ~conn = 
       return () >>= fun () ->
-      recv_string ~conn >>= function
-      | `Err_recv_string -> return `Err_recv_strings
-      | `Ok s ->
+      recv_string ~conn >>= function Error e -> return (Error()) | Ok s ->
         Marshal.from_string s 0 |> fun (ss:string list) ->
-        return (`Ok ss)
+        return (Ok ss)
     in
 
     fun k -> k ~listen_accept ~connect ~send_string ~send_strings ~recv_string ~recv_strings
@@ -273,9 +270,9 @@ module Unix_ = struct
        level; ideally this should happen invisibly, hence the exn in
        the following; however, catch and finally should function with
        these errors *)
-    type 'a m = ('a,unix_error)result
-    let return x = Ok x
-    let bind a b = match a with |Ok a -> b a | Error e -> Error e
+    type 'a m = 'a
+    let return x = x
+    let bind a b = b a
   end
   include Monad
 
@@ -294,10 +291,9 @@ module Unix_ = struct
   (* NOTE this traps exceptions from the lower level and passes them into the monad *)
   let wrap f = 
     try Ok(f ()) with 
-    | Unix.Unix_error (e,s1,s2) -> Error (e,s1,s2)
+    | Unix.Unix_error (e,s1,s2) -> Error `EOTHER
+  (* TODO refine this to match the errors eg socket_err *)
   (* NOTE other exceptions are not caught *)
-
-  let log_ s = ()
 
   let wrap1 s f = fun a -> wrap @@ fun () -> log_ s; f a
   let wrap2 s f = fun a b -> wrap @@ fun () -> log_ s; f a b 
@@ -306,29 +302,19 @@ module Unix_ = struct
 
   let ops = {
     socket=(wrap3 "socket" socket);
-    setsockopt=(wrap3 "setsockopt" setsockopt);
+    setsockopt=(setsockopt);
     bind_=(wrap2 "bind" Unix.bind);
     listen=(wrap2 "listen" listen);
     accept=(wrap1 "accept" accept);
-    getpeername=(wrap1 "getpeername" getpeername);
-    close=(wrap1 "close" close);
+    getpeername=(getpeername);
+    close=(fun c -> try close c with Unix.Unix_error _ -> ());
     connect=(wrap2 "connect" connect);
     write=(wrap4 "write" write);
     read=(wrap4 "read" read);
   }
 
-  let extra = {
-    catch=(fun f a -> 
-      match a with
-      | Ok x -> Ok x
-      | Error e -> ignore (f e); Error e);
-    finally=(fun f a -> 
-        (* NOTE a is already a result *)
-        ignore (f()); a)
-  }
-
   let (listen_accept,connect,send_string,send_strings,recv_string,recv_strings) = 
-    mk_msg_lib ~ops ~extra @@ 
+    mk_msg_lib ~ops @@ 
     fun ~listen_accept ~connect ~send_string ~send_strings ~recv_string ~recv_strings -> 
     (listen_accept,connect,send_string,send_strings,recv_string,recv_strings)
 
@@ -362,33 +348,24 @@ module Lwt_ = struct
     end)
   include Msg_lib
 
+  (* TODO refine errors *)
+  let wrap f = catch (fun () -> f () >>= fun x -> return (Ok x)) (fun e -> return (Error `EOTHER))
+
   let ops = {
-    socket=(fun a b c -> socket a b c |>return);
+    socket=(fun a b c -> wrap (fun () -> socket a b c|>return));
     setsockopt=(fun a b c -> setsockopt a b c |> return);
-    bind_=Lwt_unix.bind;
-    listen=(fun a b -> listen a b|>return);
-    accept;
+    bind_=(fun a b -> wrap (fun () -> Lwt_unix.bind a b));
+    listen=(fun a b -> wrap (fun () -> listen a b|>return));
+    accept=(fun a -> wrap (fun () -> accept a));
     getpeername=(fun x -> getpeername x |>return);
-    close;
-    connect;
-    write;
-    read;
+    close=(fun c -> catch (fun () -> close c) (fun e -> return ()));
+    connect=(fun a b -> wrap (fun () -> connect a b));
+    write=(fun a b c d -> wrap (fun () -> write a b c d));
+    read=(fun a b c d -> wrap (fun () -> read a b c d));
   }
-
-  let catch = fun (f:'e -> unit m) (a:'a m) ->
-    Lwt.catch (fun () -> a) (fun e -> f e >>= fun () -> a)
-
-  let finally uu a = 
-    Lwt.finalize (fun () -> a) uu
-
-  let extra = {
-    catch;
-    finally
-  }
-  
 
   let (listen_accept,connect,send_string,send_strings,recv_string,recv_strings) = 
-    mk_msg_lib ~ops ~extra @@ 
+    mk_msg_lib ~ops @@ 
     fun ~listen_accept ~connect ~send_string ~send_strings ~recv_string ~recv_strings -> 
     (listen_accept,connect,send_string,send_strings,recv_string,recv_strings)
 

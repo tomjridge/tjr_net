@@ -5,22 +5,20 @@ let log_ x = ()
 
 let main () = 
   log_ __LOC__;
+  Printf.printf "Receiver listening for connection\n"; flush_all();
   listen_accept ~quad:Shared.recvr >>= function
-  | `Listen_accept_incorrect_peername -> failwith __LOC__
-  | `Connection conn ->
+  | Error _ -> failwith __LOC__
+  | Ok conn ->
     log_ __LOC__;
     let rec loop i () =
       recv_string ~conn >>= function
-      | `Ok msg -> (
+      | Error () -> failwith __LOC__
+      | Ok msg -> (
           (if i mod 100 = 0 then print_endline msg else ());
           send_string ~conn msg >>= function
-          | `Ok ->
-            loop (i+1) ()
-          | _ -> failwith __LOC__)
-      | _ -> failwith __LOC__
+          | Error () -> failwith __LOC__
+          | Ok () -> loop (i+1) ())
     in
     loop 0 ()
 
-let _ = main()|> function
-  | Ok x -> ()
-  | Error (e,s1,s2) -> raise (Unix.Unix_error(e,s1,s2))
+let _ = main ()
