@@ -140,24 +140,20 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
         begin
           (* hack to speed up recovery *)
           ops.setsockopt srvr Unix.SO_REUSEADDR true >>= fun () ->
-          ops.bind_ srvr quad.local >>= function | Error e -> return (`E `Bind) | Ok () -> 
-            ops.listen srvr 5 >>= function | Error e -> return (`E `Other) | Ok () ->
-              ops.accept srvr >>= function | Error e -> return (`E `Other) | Ok (c,_) ->              
+          ops.bind_ srvr quad.local >>= function | Error e -> return (Error `Bind) | Ok () -> 
+            ops.listen srvr 5 >>= function | Error e -> return (Error `Other) | Ok () ->
+              ops.accept srvr >>= function | Error e -> return (Error `Other) | Ok (c,_) ->              
                 ops.getpeername c >>= fun pn -> 
                 if pn <> quad.remote then 
                   (* connection doesn't match quad *)                
                   ops.close c >>= fun () ->
-                  return (`E `Peername)
+                  return (Error `Peername)
                 else
-                  return (`Connection c)
+                  return (Ok c)
         end >>= begin fun r -> 
           ops.close srvr >>= fun () ->
           return r
-        end >>= function
-        | `E `Bind -> return (Error `Bind)
-        | `E `Peername -> return (Error `Peername)
-        | `E _ -> return (Error `Other)
-        | `Connection c -> return (Ok c)
+        end
     in
 
     let _ = listen_accept in  
@@ -168,12 +164,12 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
         begin
           (* hack to speed up recovery *)
           ops.setsockopt c Unix.SO_REUSEADDR true >>= fun () ->
-          ops.bind_ c quad.local >>= function Error e -> return (`E `Bind) | Ok () ->
-            ops.connect c quad.remote >>= function Error e -> return (`E `Connect) | Ok () ->
-              return (`Connection c)
+          ops.bind_ c quad.local >>= function Error e -> return (Error `Bind) | Ok () ->
+            ops.connect c quad.remote >>= function Error e -> return (Error `Connect) | Ok () ->
+              return (Ok c)
         end >>= function
-        | `E x -> ops.close c >>= fun () -> return (Error x)
-        | `Connection c -> return (Ok c)
+        | Error e -> ops.close c >>= fun () -> return (Error e)
+        | Ok c -> return (Ok c)
     in
     
     let _ = connect in
