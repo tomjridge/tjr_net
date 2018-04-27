@@ -29,4 +29,5 @@ uninstall:
 
 clean: 
 	rm -f *.cmi *.cmo *.cmx *.o *.x *.a *.cma *.cmxa
+	$(MAKE) -C bin clean
 
