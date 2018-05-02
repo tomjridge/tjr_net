@@ -48,5 +48,5 @@ EOF
 
 function clean() {
     rm -f *.cmi *.cmo *.cmx *.o *.x *.a *.cma *.cmxa
-    rm META
+    rm -f META
 }
