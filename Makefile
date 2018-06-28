@@ -27,7 +27,11 @@ uninstall:
 	ocamlfind remove $$package_name
 
 
-clean: 
+clean: FORCE
 	clean
 	$(MAKE) -C bin clean
 
+real_clean: clean
+
+
+FORCE:
