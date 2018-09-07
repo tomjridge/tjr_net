@@ -1,1 +1,11 @@
-Basic networking utilities; very rough; do not use!
+* Basic networking utilities; very rough; do not use!
+
+* Dependencies
+
+opan:
+| lwt | networking via lwt
+
+
+old:
+| lwt.unix | ? no longer an opam package ?
+
