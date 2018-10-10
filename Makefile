@@ -1,37 +1,29 @@
-SHELL:=/bin/bash
-BASH_ENV:=bash_env.sh
-export BASH_ENV
+DUNE:=opam exec dune
 
-
-all: lib
-	$(MAKE) -C bin
-
-
-lib:
-	$$ocamlc -c $$mls
-	$$ocamlopt -c $$mls
-	@echo "NOTE cma contains: $$cmos" # simple check
-	$$mk_cma -g -a -o $$libname.cma $$cmos
-	$$mk_cmxa -g -a -o $$libname.cmxa $$cmxs
-	$(MAKE) install
-
+build:
+	$(DUNE) build @install
+	$(DUNE) build bin/receiver.exe bin/sender.exe
 
 install:
-	-ocamlfind remove $$package_name
-	mk_meta
-	ocamlfind install $$package_name META *.cmi *.o *.a *.cma *.cmxa *.cmo *.cmx
+	$(DUNE) install
+
+clean:
+	$(DUNE) clean
 
 
+doc: FORCE
+	$(DUNE) build @doc
 
-uninstall:
-	ocamlfind remove $$package_name
+view_doc:
+	google-chrome  _build/default/_doc/_html/index.html
 
 
-clean: FORCE
-	clean
-	$(MAKE) -C bin clean
+run_tests:
+	$(DUNE) exec test/test_main.exe 1 5
 
-real_clean: clean
+# run_more_tests:
+# 	$(DUNE) exec test/test_main.exe 1 10
+
 
 
 FORCE:

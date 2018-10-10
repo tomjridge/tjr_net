@@ -1,0 +1,3 @@
+(executables
+  (names receiver sender)
+  (libraries tjr_net))

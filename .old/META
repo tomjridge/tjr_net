@@ -1,0 +1,6 @@
+name="tjr_net"
+description="Network utilities; very rough"
+version="2018-07-04"
+requires="lwt,lwt.unix"
+archive(byte)="tjr_net.cma"
+archive(native)="tjr_net.cmxa"

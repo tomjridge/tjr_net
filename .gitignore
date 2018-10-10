@@ -7,3 +7,6 @@
 *.a
 /META
 *.native
+/bin/.merlin
+/src/.merlin
+/tjr_net.install
