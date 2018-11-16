@@ -10,7 +10,7 @@ bug-reports: "https://github.com/tomjridge/tjr_net/issues"
 dev-repo: "https://github.com/tomjridge/tjr_net.git"
 
 build: [
-  ["dune" "subst"] {pinned}
+#  ["dune" "subst"] {pinned}
   ["dune" "build" "-p" name "-j" jobs]
 ]
 
