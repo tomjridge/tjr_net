@@ -10,3 +10,4 @@
 /bin/.merlin
 /src/.merlin
 /tjr_net.install
+_build/
