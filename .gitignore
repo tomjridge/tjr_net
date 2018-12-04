@@ -11,3 +11,4 @@
 /src/.merlin
 /tjr_net.install
 _build/
+/dune-project
