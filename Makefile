@@ -1,29 +1,21 @@
-DUNE:=opam exec dune
+TMP_DOC_DIR:=/tmp/tjr_net
+#scratch:=/tmp/l/github/scratch
 
-build:
-	$(DUNE) build @install
+default: all
+
+-include Makefile.ocaml
+
+all::
 	$(DUNE) build bin/receiver.exe bin/sender.exe
 
-install:
-	$(DUNE) install
+run_receiver:
+	xterm -hold -e "$(DUNE) exec bin/receiver.exe"
 
-clean:
-	$(DUNE) clean
-
-
-doc: FORCE
-	$(DUNE) build @doc
-
-view_doc:
-	google-chrome  _build/default/_doc/_html/index.html
+run_sender:
+	xterm -hold -e "$(DUNE) exec bin/sender.exe"
 
 
-run_tests:
-	$(DUNE) exec test/test_main.exe 1 5
+docs::
 
-# run_more_tests:
-# 	$(DUNE) exec test/test_main.exe 1 10
-
-
-
-FORCE:
+# for auto-completion of Makefile target
+clean::

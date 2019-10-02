@@ -1,3 +1,7 @@
+(env
+  (_ (flags (:standard -open Tjr_lib))))
+
 (executables
   (names receiver sender)
-  (libraries tjr_net))
+  (preprocess (pps ppx_deriving_yojson))
+  (libraries tjr_lib tjr_net))

@@ -2,12 +2,25 @@ open Tjr_net
 open Lwt_unix
 open Tjr_connection
 
-let ip = Unix.inet_addr_of_string "127.0.0.1"
-let rport=4001
-let sport=4007
+module Config = struct
+  type config = { ip:string; rport:int; sport: int } [@@deriving yojson]
 
-let s = ADDR_INET(ip,sport)
-let r = ADDR_INET(ip,rport)
+  let default_config = Some {
+      ip = "127.0.0.1";
+      rport=4001;
+      sport=4007;
+    }
+
+  let filename = "tjr_net.config"
+end
+
+module Config' = Tjr_config.Make(Config)
+
+let config = Config'.config
+
+let ip = Unix.inet_addr_of_string config.ip
+let s = ADDR_INET(ip,config.sport)
+let r = ADDR_INET(ip,config.rport)
 
 let sender = { local=s; remote=r }
 let recvr = {local=r; remote=s }

@@ -1,3 +1,4 @@
+(* FIXME tidy this up and release; split unix to separate package *)
 
 let log_ s = ()
 
