@@ -179,7 +179,9 @@ module Make_msg_lib(Net_ops:NET_OPS) = struct
 
     (* send length as 4 bytes, then the string itself; NOTE for
        performance, it is quite important to try to call write with a
-       buffer which includes everything to do with the message *)
+       buffer which includes everything to do with the message; NOTE
+       OCaml strings are fixed-length sequence of single-byte chars,
+       so we don't need to worry about unicode (?) *)
     let send_string ~conn s =
       return () >>= fun () ->
       String.length s |> fun len ->
