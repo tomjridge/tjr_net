@@ -1,6 +1,6 @@
-open Tjr_net
+(* NOTE we specialize to Lwt instance *)
+
 open Lwt_unix
-open Tjr_connection
 
 module Config = struct
   type config = { ip:string; rport:int; sport: int } [@@deriving yojson]

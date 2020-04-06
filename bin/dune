@@ -1,5 +1,5 @@
 (env
-  (_ (flags (:standard -open Tjr_lib))))
+  (_ (flags (:standard -open Tjr_lib -open Tjr_net -open Tjr_net.Net_intf))))
 
 (executables
   (names receiver sender)
