@@ -16,7 +16,7 @@ end
 
 module Config' = Tjr_config.Make(Config)
 
-let config = Config'.config
+let config = Lazy.force Config'.config
 
 let ip = Unix.inet_addr_of_string config.ip
 let s = ADDR_INET(ip,config.sport)
