@@ -4,7 +4,7 @@ synopsis: "Basic networking utilities"
 maintainer: ["Tom Ridge <tom.j.ridge@googlemail.com>"]
 authors: ["Tom Ridge <tom.j.ridge@googlemail.com>"]
 homepage: "https://github.com/tomjridge/tjr_net"
-doc: "https://tomjridge.github.io/tjr_net"
+doc: "https://tomjridge.github.io/ocamldocs"
 bug-reports: "https://github.com/tomjridge/tjr_net/issues"
 depends: [
   "dune" {>= "2.0"}

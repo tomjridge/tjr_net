@@ -6,10 +6,10 @@
 (maintainers          "Tom Ridge <tom.j.ridge@googlemail.com>")
 (source               (github tomjridge/tjr_net))
 (homepage             https://github.com/tomjridge/tjr_net)
-(documentation        https://tomjridge.github.io/tjr_net)
+(documentation        https://tomjridge.github.io/ocamldocs)
 (generate_opam_files  true)
 
 (package 
  (name tjr_net)
  (synopsis "Basic networking utilities")
- (depends lwt))
+ (depends lwt tjr_lib))
