@@ -9,6 +9,7 @@ bug-reports: "https://github.com/tomjridge/tjr_net/issues"
 depends: [
   "dune" {>= "2.0"}
   "lwt"
+  "tjr_lib"
 ]
 build: [
   ["dune" "subst"] {pinned}
